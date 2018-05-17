@@ -44,21 +44,23 @@ def load_vgg(sess, vgg_path):
 tests.test_load_vgg(load_vgg, tf)
 
 
-def conv_1x1(x, num_classes, kernel_size = 1):
+def conv_1x1(name, input_layer, num_classes, kernel_size = 1):
     return tf.layers.conv2d(
-        x, num_classes, kernel_size = 4,
+        input_layer, num_classes, kernel_size = 4,
         padding = 'SAME', 
         kernel_initializer = tf.random_normal_initializer(stddev = 0.01),
-        kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3))
+        kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3),
+        name = name)
 
-def upsample(x, num_classes, kernel_size = 4, strides = (2, 2)):
+def upsample(name, input_layer, num_classes, kernel_size = 4, strides = (2, 2)):
     return tf.layers.conv2d_transpose(
-        x, num_classes, kernel_size, strides = strides, padding = 'SAME', 
+        input_layer, num_classes, kernel_size, strides = strides, padding = 'SAME', 
         kernel_initializer = tf.random_normal_initializer(stddev = 0.01), 
-        kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3))
+        kernel_regularizer = tf.contrib.layers.l2_regularizer(1e-3),
+        name = name)
 
-def skip_layer(x, y):
-    return tf.add(x, y)
+def skip_layer(name, input_layer, output_layer):
+    return tf.add(input_layer, output_layer, name = name)
 
 
 def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
@@ -70,14 +72,14 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :param num_classes: Number of classes to classify
     :return: The Tensor for the last layer of output
     """
-    layer7_1x1 = conv_1x1(vgg_layer7_out, num_classes)
-    layer7_up = upsample(layer7_1x1, num_classes)
-    layer4_1x1 = conv_1x1(vgg_layer4_out, num_classes)
-    layer4_skip = skip_layer(layer7_up, layer4_1x1)
-    layer4_up = upsample(layer4_skip, num_classes)
-    layer3_1x1 = conv_1x1(vgg_layer3_out, num_classes)
-    layer3_skip = skip_layer(layer4_up, layer3_1x1)
-    layer3_up = upsample(layer3_skip, num_classes, kernel_size = 16, strides = (8, 8))
+    layer7_1x1  = conv_1x1('layer7_1x1', vgg_layer7_out, num_classes)
+    layer7_up   = upsample('layer7_up', layer7_1x1, num_classes)
+    layer4_1x1  = conv_1x1('layer4_1x1', vgg_layer4_out, num_classes)
+    layer4_skip = skip_layer('layer4_skip', layer7_up, layer4_1x1)
+    layer4_up   = upsample('layer4_up', layer4_skip, num_classes)
+    layer3_1x1  = conv_1x1('layer3_1x1', vgg_layer3_out, num_classes)
+    layer3_skip = skip_layer('layer3_skip', layer4_up, layer3_1x1)
+    layer3_up   = upsample('nn_last_layer', layer3_skip, num_classes, kernel_size = 16, strides = (8, 8))
 
     return layer3_up
 tests.test_layers(layers)
@@ -92,8 +94,8 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :param num_classes: Number of classes to classify
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
-    logits = tf.reshape(nn_last_layer, (-1, num_classes))
-    labels = tf.reshape(correct_label, (-1, num_classes))
+    logits = tf.reshape(nn_last_layer, (-1, num_classes), name = 'logits')
+    labels = tf.reshape(correct_label, (-1, num_classes), name = 'labels')
 
     # Loss function
     cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits = logits, labels = labels))
@@ -140,6 +142,7 @@ def run():
     image_shape = (160, 576)
     data_dir = './data'
     runs_dir = './runs'
+    model_path = './model/model'
     tests.test_for_kitti_dataset(data_dir)
 
     # Download pretrained vgg model
@@ -171,11 +174,15 @@ def run():
 
         # Training NN using the train_nn function
 
-        epochs = 7
+        epochs = 1
         batch_size = 2
 
         train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image, correct_label,
                  keep_prob, learning_rate)
+
+        saver = tf.train.Saver()
+        save_path = saver.save(sess, model_path)
+        print("Model has been saved in: %s" % save_path)
 
         # Saving inference data using helper.save_inference_samples
         helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)

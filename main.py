@@ -5,6 +5,12 @@ import warnings
 from distutils.version import LooseVersion
 import project_tests as tests
 
+import scipy.misc
+import re
+from glob import glob
+import numpy as np
+from sklearn.utils import shuffle
+
 
 # Check TensorFlow Version
 assert LooseVersion(tf.__version__) >= LooseVersion('1.0'), 'Please use TensorFlow version 1.0 or newer.  You are using {}'.format(tf.__version__)
@@ -129,12 +135,61 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     print()
     for i in range(epochs):
         print("EPOCH {} ...".format(i+1))
+        sum_loss = 0.0
+        count = 0
         for image, label in get_batches_fn(batch_size):
             _, loss = sess.run([train_op, cross_entropy_loss],
                                feed_dict = {input_image: image, correct_label: label, keep_prob: 0.5, learning_rate: 0.0009})
-            print("Loss: = {:.3f}".format(loss))
-        print()
+            sum_loss += loss
+            count += 1
+        print("Avg Loss: {:.3f}".format(sum_loss / count))
 tests.test_train_nn(train_nn)
+
+
+
+def get_augmented_batch_function(data_folder, image_shape):
+    """
+    Loads the training sample and augments it by flipping images,
+    and generates function to create batches of training data
+    :param data_folder: Path to folder that contains all the datasets
+    :param image_shape: Tuple - Shape of image
+    :return:
+    """
+    image_paths = glob(os.path.join(data_folder, 'image_2', '*.png'))
+    label_paths = {
+        re.sub(r'_(lane|road)_', '_', os.path.basename(path)): path
+        for path in glob(os.path.join(data_folder, 'gt_image_2', '*_road_*.png'))}
+    background_color = np.array([255, 0, 0])
+
+    images = []
+    gt_images = []
+
+    for image_file in image_paths:
+        gt_image_file = label_paths[os.path.basename(image_file)]
+
+        image = scipy.misc.imresize(scipy.misc.imread(image_file), image_shape)
+        gt_image = scipy.misc.imresize(scipy.misc.imread(gt_image_file), image_shape)
+
+        gt_bg = np.all(gt_image == background_color, axis=2)
+        gt_bg = gt_bg.reshape(*gt_bg.shape, 1)
+        gt_image = np.concatenate((gt_bg, np.invert(gt_bg)), axis=2)
+
+        images.append(image)
+        gt_images.append(gt_image)
+        images.append(np.fliplr(image))
+        gt_images.append(np.fliplr(gt_image))
+
+    images, gt_images = shuffle(images, gt_images)
+
+    def get_batches_fn(batch_size):
+        """
+        Create batches of training data
+        :param batch_size: Batch Size
+        :return: Batches of training data
+        """
+        for batch_i in range(0, len(images), batch_size):
+            yield images[batch_i:batch_i+batch_size], gt_images[batch_i:batch_i+batch_size]
+    return get_batches_fn
 
 
 def run():
@@ -145,21 +200,22 @@ def run():
     model_path = './model/model'
     tests.test_for_kitti_dataset(data_dir)
 
+    epochs = 20
+    batch_size = 2
+
     # Download pretrained vgg model
     helper.maybe_download_pretrained_vgg(data_dir)
-
-    # OPTIONAL: Train and Inference on the cityscapes dataset instead of the Kitti dataset.
-    # You'll need a GPU with at least 10 teraFLOPS to train on.
-    #  https://www.cityscapes-dataset.com/
 
     with tf.Session() as sess:
         # Path to vgg model
         vgg_path = os.path.join(data_dir, 'vgg')
-        # Create function to get batches
-        get_batches_fn = helper.gen_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
 
-        # OPTIONAL: Augment Images for better results
-        #  https://datascience.stackexchange.com/questions/5224/how-to-prepare-augment-images-for-neural-network
+        # Create function to get batches
+        #get_batches_fn = helper.gen_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
+        print("Getting and augmenting training set ...")
+        # Augmenting images to the trainning set (for better results)
+        get_batches_fn = get_augmented_batch_function(os.path.join(data_dir, 'data_road/training'), image_shape)
+        print("Training set retrieved")
 
         # Building NN using load_vgg, layers, and optimize function
 
@@ -174,9 +230,6 @@ def run():
 
         # Training NN using the train_nn function
 
-        epochs = 1
-        batch_size = 2
-
         train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image, correct_label,
                  keep_prob, learning_rate)
 
@@ -187,7 +240,7 @@ def run():
         # Saving inference data using helper.save_inference_samples
         helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
 
-        # OPTIONAL: Apply the trained model to a video
+        # To apply the trained model to a video see the script: video.py
 
 
 if __name__ == '__main__':

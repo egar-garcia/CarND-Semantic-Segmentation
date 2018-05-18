@@ -106,7 +106,7 @@ Training Finished. Saving test images to: ./runs/1526621995.0750496
 #### Does the project use reasonable hyperparameters?
 ##### The number of epoch and batch size are set to a reasonable number.
 
-For this project I chose a number of 20 ephocs, after some tests around greater than that number looked to be not doing a huge improvement on the NN learning.
+For this project I chose a number of 20 ephocs, after some tests, it was observed that for greater numbers the NN was not doing significant improvement on learning.
 
 In terms of the batch size I picked 2, this was due to memory limitations since my GPU was not working for greater values (preloaded VGG model is already too big).
 
